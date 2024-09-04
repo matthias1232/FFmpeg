@@ -10080,12 +10080,6 @@ static int mov_read_header(AVFormatContext *s)
     MOVAtom atom = { AV_RL32("root") };
     int i;
 
-    if (mov->decryption_key_len != 0 && mov->decryption_key_len != AES_CTR_KEY_SIZE) {
-        av_log(s, AV_LOG_ERROR, "Invalid decryption key len %d expected %d\n",
-            mov->decryption_key_len, AES_CTR_KEY_SIZE);
-        return AVERROR(EINVAL);
-    }
-
     mov->fc = s;
     mov->trak_index = -1;
     mov->thmb_item_id = -1;
