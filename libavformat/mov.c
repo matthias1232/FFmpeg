@@ -7826,15 +7826,21 @@ static int cenc_scheme_decrypt(MOVContext *c, MOVStreamContext *sc, AVEncryption
 {
     int i, ret;
     int bytes_of_protected_data;
+    uint8_t decryption_key[AES_CTR_KEY_SIZE];
 
     if (!sc->cenc.aes_ctr) {
+        ret = get_key_from_kid(decryption_key, sizeof(decryption_key), c, sample);
+        if (ret < 0) {
+            return ret;
+        }
+        
         /* initialize the cipher */
         sc->cenc.aes_ctr = av_aes_ctr_alloc();
         if (!sc->cenc.aes_ctr) {
             return AVERROR(ENOMEM);
         }
 
-        ret = av_aes_ctr_init(sc->cenc.aes_ctr, c->decryption_key);
+        ret = av_aes_ctr_init(sc->cenc.aes_ctr, decryption_key);
         if (ret < 0) {
             return ret;
         }
@@ -7874,7 +7880,44 @@ static int cenc_scheme_decrypt(MOVContext *c, MOVStreamContext *sc, AVEncryption
 
     return 0;
 }
+        
+static int get_key_from_kid(uint8_t* out, int len, MOVContext *c, AVEncryptionInfo *sample) {
+    AVDictionaryEntry *key_entry_hex;
+    char kid_hex[16*2+1];
 
+    if (c->decryption_default_key && c->decryption_default_key_len != len) {
+        av_log(c->fc, AV_LOG_ERROR, "invalid default decryption key length: got %d, expected %d\n", c->decryption_default_key_len, len);
+        return -1;
+    }
+
+    if (!c->decryption_keys) {
+        av_assert0(c->decryption_default_key);
+        memcpy(out, c->decryption_default_key, len);
+        return 0;
+    }
+
+    if (sample->key_id_size != 16) {
+        av_log(c->fc, AV_LOG_ERROR, "invalid key ID size: got %u, expected 16\n", sample->key_id_size);
+        return -1;
+    }
+
+    ff_data_to_hex(kid_hex, sample->key_id, 16, 1);
+    key_entry_hex = av_dict_get(c->decryption_keys, kid_hex, NULL, AV_DICT_DONT_STRDUP_KEY|AV_DICT_DONT_STRDUP_VAL);
+    if (!key_entry_hex) {
+        if (!c->decryption_default_key) {
+            av_log(c->fc, AV_LOG_ERROR, "unable to find KID %s\n", kid_hex);
+            return -1;
+        }
+        memcpy(out, c->decryption_default_key, len);
+        return 0;
+    }
+    if (strlen(key_entry_hex->value) != len*2) {
+        return -1;
+    }
+    ff_hex_to_data(out, key_entry_hex->value);
+    return 0;
+}
+        
 static int cbc1_scheme_decrypt(MOVContext *c, MOVStreamContext *sc, AVEncryptionInfo *sample, uint8_t *input, int size)
 {
     int i, ret;
